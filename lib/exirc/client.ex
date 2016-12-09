@@ -772,7 +772,7 @@ defmodule ExIrc.Client do
   defp send_event(msg, %ClientState{event_handlers: handlers}) when is_list(handlers) do
     Enum.each(handlers, fn
       {{pid, false}, _} -> Kernel.send(pid, msg) 
-      {{pid, true}, _} -> Kernel.send(pid, %{msg: msg, pid: pid}) 
+      {{pid, true}, _} -> Kernel.send(pid, %{msg: msg, pid: self}) 
     end)
   end
 
