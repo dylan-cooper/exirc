@@ -230,6 +230,15 @@ defmodule ExIrc.Client do
   def add_handler(client, pid) do
     GenServer.call(client, {:add_handler, pid})
   end
+
+  @doc """
+  Add a new verbose event handler process
+  """
+  @spec add_verbose_handler(client :: pid, pid) :: :ok
+  def add_verbose_handler(client, pid) do
+    GenServer.call(client, {:add_verbose_handler, pid})
+  end
+
   @doc """
   Add a new event handler process, asynchronously
   """
@@ -237,6 +246,15 @@ defmodule ExIrc.Client do
   def add_handler_async(client, pid) do
     GenServer.cast(client, {:add_handler, pid})
   end
+
+  @doc """
+  Add a new verbose event handler process, asynchronously
+  """
+  @spec add_verbose_handler_async(client :: pid, pid) :: :ok
+  def add_verbose_handler_async(client, pid) do
+    GenServer.cast(client, {:add_verbose_handler, pid})
+  end
+
   @doc """
   Remove an event handler process
   """
@@ -318,6 +336,12 @@ defmodule ExIrc.Client do
     handlers = do_add_handler(pid, state.event_handlers)
     {:reply, :ok, %{state | event_handlers: handlers}}
   end
+
+  def handle_call({:add_verbose_handler, pid}, _from, state) do
+    handlers = do_add_handler(pid, state.event_handlers, true)
+    {:reply, :ok, %{state | event_handlers: handlers}}
+  end
+
   # Handles call to remove an event handler process
   def handle_call({:remove_handler, pid}, _from, state) do
     handlers = do_remove_handler(pid, state.event_handlers)
@@ -437,6 +461,13 @@ defmodule ExIrc.Client do
     handlers = do_add_handler(pid, state.event_handlers)
     {:noreply, %{state | event_handlers: handlers}}
   end
+
+  # Handles message to add a new event handler process asynchronously
+  def handle_cast({:add_verbose_handler, pid}, state) do
+    handlers = do_add_handler(pid, state.event_handlers, true)
+    {:noreply, %{state | event_handlers: handlers}}
+  end
+
   @doc """
   Handles asynchronous messages from the external API. Not recommended to call these directly.
   """
@@ -739,24 +770,35 @@ defmodule ExIrc.Client do
   # Internal API
   ###############
   defp send_event(msg, %ClientState{event_handlers: handlers}) when is_list(handlers) do
-    Enum.each(handlers, fn({pid, _}) -> Kernel.send(pid, msg) end)
+    Enum.each(handlers, fn
+      {{pid, false}, _} -> Kernel.send(pid, msg) 
+      {{pid, true}, _} -> Kernel.send(pid, %{msg: msg, pid: pid}) 
+    end)
   end
 
-  defp do_add_handler(pid, handlers) do
-    case Enum.member?(handlers, pid) do
+  defp do_add_handler(pid, handlers, verbose \\ false) do
+    case Enum.member?(handlers, {pid, verbose}) do
       false ->
         ref = Process.monitor(pid)
-        [{pid, ref} | handlers]
+        [{{pid, verbose}, ref} | handlers]
       true ->
         handlers
     end
   end
 
   defp do_remove_handler(pid, handlers) do
-    case List.keyfind(handlers, pid, 0) do
-      {pid, ref} ->
+    case List.keyfind(handlers, {pid, false}, 0) do
+      {{pid, false}, ref} ->
         Process.demonitor(ref)
-        List.keydelete(handlers, pid, 0)
+        List.keydelete(handlers, {pid, false}, 0)
+      nil ->
+        handlers
+    end
+
+    case List.keyfind(handlers, {pid, true}, 0) do
+      {{pid, true}, ref} ->
+        Process.demonitor(ref)
+        List.keydelete(handlers, {pid, true}, 0)
       nil ->
         handlers
     end
